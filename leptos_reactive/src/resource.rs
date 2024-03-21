@@ -3,10 +3,10 @@ use crate::SharedContext;
 #[cfg(debug_assertions)]
 use crate::SpecialNonReactiveZone;
 use crate::{
-    create_isomorphic_effect, create_memo, create_render_effect, create_signal,
+    create_isomorphic_effect, create_render_effect, create_signal,
     queue_microtask, runtime::with_runtime, serialization::Serializable,
     signal_prelude::format_signal_warning, spawn::spawn_local,
-    suspense::LocalStatus, use_context, GlobalSuspenseContext, Memo,
+    suspense::LocalStatus, use_context, GlobalSuspenseContext,
     ReadSignal, ScopeProperty, Signal, SignalDispose, SignalGet,
     SignalGetUntracked, SignalSet, SignalUpdate, SignalWith,
     SignalWithUntracked, SuspenseContext, WriteSignal,
@@ -99,7 +99,7 @@ pub fn create_resource<S, T, Fu>(
     fetcher: impl Fn(S) -> Fu + 'static,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: Serializable + 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -135,7 +135,7 @@ pub fn create_resource_with_initial_value<S, T, Fu>(
     initial_value: Option<T>,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: Serializable + 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -183,7 +183,7 @@ pub fn create_blocking_resource<S, T, Fu>(
     fetcher: impl Fn(S) -> Fu + 'static,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: Serializable + 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -202,7 +202,7 @@ fn create_resource_helper<S, T, Fu>(
     serializable: ResourceSerialization,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: Serializable + 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -214,14 +214,14 @@ where
     let fetcher = Rc::new(move |s| {
         Box::pin(fetcher(s)) as Pin<Box<dyn Future<Output = T>>>
     });
-    let source = create_memo(move |_| source());
+    let source = Rc::new(source);
 
     let r = Rc::new(ResourceState {
         value,
         set_value,
         loading,
         set_loading,
-        source,
+        source: source.clone(),
         fetcher,
         scheduled: Rc::new(Cell::new(false)),
         version: Rc::new(Cell::new(0)),
@@ -242,7 +242,7 @@ where
     create_isomorphic_effect({
         let r = Rc::clone(&r);
         move |_| {
-            source.track();
+            source();
             load_resource(id, r.clone());
         }
     });
@@ -307,7 +307,7 @@ pub fn create_local_resource<S, T, Fu>(
     fetcher: impl Fn(S) -> Fu + 'static,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -341,7 +341,7 @@ pub fn create_local_resource_with_initial_value<S, T, Fu>(
     initial_value: Option<T>,
 ) -> Resource<S, T>
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: 'static,
     Fu: Future<Output = T> + 'static,
 {
@@ -352,14 +352,14 @@ where
     let fetcher = Rc::new(move |s| {
         Box::pin(fetcher(s)) as Pin<Box<dyn Future<Output = T>>>
     });
-    let source = create_memo(move |_| source());
+    let source = Rc::new(source);
 
     let r = Rc::new(ResourceState {
         value,
         set_value,
         loading,
         set_loading,
-        source,
+        source: source.clone(),
         fetcher,
         scheduled: Rc::new(Cell::new(false)),
         version: Rc::new(Cell::new(0)),
@@ -382,7 +382,7 @@ where
     create_render_effect({
         let r = Rc::clone(&r);
         move |_| {
-            source.track();
+            source();
             r.load(false, id)
         }
     });
@@ -399,7 +399,7 @@ where
 #[cfg(not(feature = "hydrate"))]
 fn load_resource<S, T>(id: ResourceId, r: Rc<ResourceState<S, T>>)
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: 'static,
 {
     SUPPRESS_RESOURCE_LOAD.with(|s| {
@@ -412,7 +412,7 @@ where
 #[cfg(feature = "hydrate")]
 fn load_resource<S, T>(id: ResourceId, r: Rc<ResourceState<S, T>>)
 where
-    S: PartialEq + Clone + 'static,
+    S: Clone + 'static,
     T: Serializable + 'static,
 {
     use wasm_bindgen::{JsCast, UnwrapThrowExt};
@@ -1011,7 +1011,7 @@ where
         fetcher: impl Fn(S) -> Fu + 'static,
     ) -> Resource<S, T>
     where
-        S: PartialEq + Clone + 'static,
+        S: Clone + 'static,
         T: Serializable + 'static,
         Fu: Future<Output = T> + 'static,
     {
@@ -1060,7 +1060,7 @@ where
         fetcher: impl Fn(S) -> Fu + 'static,
     ) -> Resource<S, T>
     where
-        S: PartialEq + Clone + 'static,
+        S: Clone + 'static,
         T: 'static,
         Fu: Future<Output = T> + 'static,
     {
@@ -1122,7 +1122,7 @@ where
     set_value: WriteSignal<Option<T>>,
     pub loading: ReadSignal<bool>,
     set_loading: WriteSignal<bool>,
-    source: Memo<S>,
+    source: Rc<dyn Fn() -> S>,
     #[allow(clippy::type_complexity)]
     fetcher: Rc<dyn Fn(S) -> Pin<Box<dyn Future<Output = T>>>>,
     scheduled: Rc<Cell<bool>>,
@@ -1354,55 +1354,53 @@ where
         self.version.set(version);
         self.scheduled.set(false);
 
-        _ = self.source.try_with_untracked(|source| {
-            let fut = (self.fetcher)(source.clone());
+        let fut = (self.fetcher)((self.source)());
 
-            // `scheduled` is true for the rest of this code only
-            self.scheduled.set(true);
-            queue_microtask({
-                let scheduled = Rc::clone(&self.scheduled);
-                move || {
-                    scheduled.set(false);
+        // `scheduled` is true for the rest of this code only
+        self.scheduled.set(true);
+        queue_microtask({
+            let scheduled = Rc::clone(&self.scheduled);
+            move || {
+                scheduled.set(false);
+            }
+        });
+
+        self.set_loading.update(|n| *n = true);
+
+        // increment counter everywhere it's read
+        let suspense_contexts = self.suspense_contexts.clone();
+
+        for suspense_context in suspense_contexts.borrow().iter() {
+            suspense_context.increment_for_resource(
+                self.serializable != ResourceSerialization::Local,
+                id,
+            );
+            if self.serializable == ResourceSerialization::Blocking {
+                suspense_context.should_block.set_value(true);
+            }
+        }
+
+        // run the Future
+        let serializable = self.serializable;
+        spawn_local({
+            let set_value = self.set_value;
+            let set_loading = self.set_loading;
+            let last_version = self.version.clone();
+            async move {
+                let res = fut.await;
+
+                if version == last_version.get() {
+                    set_value.try_update(|n| *n = Some(res));
+                    set_loading.try_update(|n| *n = false);
                 }
-            });
 
-            self.set_loading.update(|n| *n = true);
-
-            // increment counter everywhere it's read
-            let suspense_contexts = self.suspense_contexts.clone();
-
-            for suspense_context in suspense_contexts.borrow().iter() {
-                suspense_context.increment_for_resource(
-                    self.serializable != ResourceSerialization::Local,
-                    id,
-                );
-                if self.serializable == ResourceSerialization::Blocking {
-                    suspense_context.should_block.set_value(true);
+                for suspense_context in suspense_contexts.borrow().iter() {
+                    suspense_context.decrement_for_resource(
+                        serializable != ResourceSerialization::Local,
+                        id,
+                    );
                 }
             }
-
-            // run the Future
-            let serializable = self.serializable;
-            spawn_local({
-                let set_value = self.set_value;
-                let set_loading = self.set_loading;
-                let last_version = self.version.clone();
-                async move {
-                    let res = fut.await;
-
-                    if version == last_version.get() {
-                        set_value.try_update(|n| *n = Some(res));
-                        set_loading.try_update(|n| *n = false);
-                    }
-
-                    for suspense_context in suspense_contexts.borrow().iter() {
-                        suspense_context.decrement_for_resource(
-                            serializable != ResourceSerialization::Local,
-                            id,
-                        );
-                    }
-                }
-            })
         });
     }
     #[cfg_attr(
