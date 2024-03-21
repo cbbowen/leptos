@@ -206,7 +206,6 @@ where
     T: Serializable + 'static,
     Fu: Future<Output = T> + 'static,
 {
-    let resolved = initial_value.is_some();
     let (value, set_value) = create_signal(initial_value);
 
     let (loading, set_loading) = create_signal(false);
@@ -224,7 +223,6 @@ where
         set_loading,
         source,
         fetcher,
-        resolved: Rc::new(Cell::new(resolved)),
         scheduled: Rc::new(Cell::new(false)),
         version: Rc::new(Cell::new(0)),
         suspense_contexts: Default::default(),
@@ -347,7 +345,6 @@ where
     T: 'static,
     Fu: Future<Output = T> + 'static,
 {
-    let resolved = initial_value.is_some();
     let (value, set_value) = create_signal(initial_value);
 
     let (loading, set_loading) = create_signal(false);
@@ -364,7 +361,6 @@ where
         set_loading,
         source,
         fetcher,
-        resolved: Rc::new(Cell::new(resolved)),
         scheduled: Rc::new(Cell::new(false)),
         version: Rc::new(Cell::new(0)),
         suspense_contexts: Default::default(),
@@ -427,7 +423,6 @@ where
             // The server already sent us the serialized resource value, so
             // deserialize & set it now
             context.pending_resources.remove(&id); // no longer pending
-            r.resolved.set(true);
 
             let res = T::de(&data).unwrap_or_else(|e| {
                 panic!(
@@ -448,7 +443,6 @@ where
             r.set_loading.update(|n| *n = true);
 
             let resolve = {
-                let resolved = r.resolved.clone();
                 let set_value = r.set_value;
                 let set_loading = r.set_loading;
                 move |res: String| {
@@ -458,7 +452,6 @@ where
                              {e:?}"
                         )
                     });
-                    resolved.set(true);
                     set_value.update(|n| *n = Some(res));
                     set_loading.update(|n| *n = false);
                 }
@@ -1132,7 +1125,6 @@ where
     source: Memo<S>,
     #[allow(clippy::type_complexity)]
     fetcher: Rc<dyn Fn(S) -> Pin<Box<dyn Future<Output = T>>>>,
-    resolved: Rc<Cell<bool>>,
     scheduled: Rc<Cell<bool>>,
     version: Rc<Cell<usize>>,
     suspense_contexts: Rc<RefCell<HashSet<SuspenseContext>>>,
@@ -1392,7 +1384,6 @@ where
             // run the Future
             let serializable = self.serializable;
             spawn_local({
-                let resolved = self.resolved.clone();
                 let set_value = self.set_value;
                 let set_loading = self.set_loading;
                 let last_version = self.version.clone();
@@ -1400,7 +1391,6 @@ where
                     let res = fut.await;
 
                     if version == last_version.get() {
-                        resolved.set(true);
                         set_value.try_update(|n| *n = Some(res));
                         set_loading.try_update(|n| *n = false);
                     }
